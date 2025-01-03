@@ -1,7 +1,3 @@
-// 이 파일은 ArduinoIDE에서 상단바
-//  File >> Examples >> (Examples for Arduino Uno)Firmata >> StandardFirmata
-// 로 들어가서 이곳에 스케치를 작성해야합니다.
-
 #include "StepMotor.h"
 
 Stepper stepper_x(8, 9, 10, 11);
