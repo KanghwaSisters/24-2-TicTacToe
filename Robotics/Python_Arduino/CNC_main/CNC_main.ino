@@ -8,6 +8,9 @@ TicTacToeArtist artist(21, 21, &stepper_x, &stepper_y, &stepper_z);
 
 int current_state = 0; // 현재 상태를 추적하는 변수
 
+char command;
+int int_command;
+
 void setup() {
     Serial.begin(115200); // 시리얼 통신 시작
     Serial.println("Setup complete");
@@ -15,7 +18,10 @@ void setup() {
 
 void loop() {
     if (Serial.available()) { // 새로운 데이터가 들어왔는지 확인
-        char command = Serial.read(); // Python에서 보낸 명령 읽기
+        command = Serial.read(); // Python에서 보낸 명령 읽기
+        if (command >= '0' && command <= '8'){ // 만약 숫자(위치)명령인 경우 아스키코드를 정수로 변환
+            int_command = command - '0';
+        }
 
         switch (current_state) {
             case 0 :
@@ -28,7 +34,7 @@ void loop() {
 
                     case 'O' :
                         current_state = 1;
-                        Serial.prinln("Setting O");
+                        Serial.println("Setting O");
                         break;
 
                     case 'X' :
@@ -37,26 +43,24 @@ void loop() {
                         break;
 
                     default:
-                        Serial.prinln("Nothing");
+                        Serial.println("Nothing");
                 }
                 break;
 
             case 1 :
-                int int_command = command.toInt();
                 artist.drawCircle(int_command);
                 Serial.println("Done: drawCircle");
                 current_state = 0;
                 break;
             
             case 2 :
-                int int_command = command.toInt();
                 artist.drawX(int_command);
                 Serial.println("Done: drawX");
                 current_state = 0;
                 break;
 
             default:
-                Serial.prinln("Nothing");
+                Serial.println("Nothing");
         }
     }
 }
