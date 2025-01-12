@@ -3,7 +3,7 @@ import random
 from typing import Tuple
 import copy
 
-from Environment2 import Environment
+from Environment import Environment
 
 # parameter
 STATE_SIZE = (3, 3)

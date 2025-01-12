@@ -6,7 +6,7 @@ Stepper stepper_z(A5, A4, A3, A2);
 
 TicTacToeArtist artist(21, 21, &stepper_x, &stepper_y, &stepper_z);
 
-int current_state = 0; // 현재 상태를 추적하는 변수
+int current_stage = 0; // 현재 상태를 추적하는 변수
 
 char command;
 int int_command;
@@ -23,22 +23,22 @@ void loop() {
             int_command = command - '0';
         }
 
-        switch (current_state) {
+        switch (current_stage) {
             case 0 :
                 switch (command) {
                     case 'S' :
                         artist.drawGameBoard();
                         Serial.println("Done: draw Game board");
-                        current_state = 0;
+                        current_stage = 0;
                         break;
 
                     case 'O' :
-                        current_state = 1;
+                        current_stage = 1;
                         Serial.println("Setting O");
                         break;
 
                     case 'X' :
-                        current_state = 2;
+                        current_stage = 2;
                         Serial.println("Setting X");
                         break;
 
@@ -50,13 +50,13 @@ void loop() {
             case 1 :
                 artist.drawCircle(int_command);
                 Serial.println("Done: drawCircle");
-                current_state = 0;
+                current_stage = 0;
                 break;
             
             case 2 :
                 artist.drawX(int_command);
                 Serial.println("Done: drawX");
-                current_state = 0;
+                current_stage = 0;
                 break;
 
             default:
