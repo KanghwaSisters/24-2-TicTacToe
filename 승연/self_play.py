@@ -3,32 +3,48 @@ import numpy as np
 import copy
 import pickle
 
-from tictactoe_env import Environment
 from ResNet import ResidualBlock, Net
 from mcts import Mcts
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname('/Users/seungyeonlee/Documents/GitHub/24-2-TicTacToe'))))
+
+from Environment import Environment
+from Environment import State
 
 # parameter
 SP_GAME_COUNT = 500  # 셀프 플레이를 수행할 게임 수(오리지널: 25,000)
 SP_TEMPERATURE = 1.0  # 볼츠만 분포의 온도 파라미터
 
 CONV_UNITS = 64
+env = Environment()
+state = State()
 
 # 1번의 게임 play 함수
 def play_one_game(model):
-    env.reset()
     history = []
 
-    while not env.done:
-        state = env.present_state.copy()
+    state = State()
+
+    while not is_done:
         mcts = Mcts(env, model, state, temperature = SP_TEMPERATURE)
-        policy, action = mcts.get_action()
-        _, reward, _, _ = env.step(action)
+        policies, _ = mcts.get_action() # 가능한 행동들의 확률 분포 얻기
+        legal_actions = np.where(state.get_legal_actions() == 1) # 가능한 행동 (index)
 
-        state[[0, 1]] = state[[1, 0]] if not env.player else state[[0, 1]] # player = True 기준, (player_state, enemy_state) 고정
-        history.append((state, policy))
+        policy = [0] * (env.n ** 2)
+        for action, policy in zip(legal_actions, policies):
+            policy[action] = policy
+        
+        history.append([[state.state, state.enemy_state], policy, None])
 
-    history = [(x[0], x[1], reward) for x in history]
+        # 가능한 행동 중 랜덤으로 선택해서 게임 진행
+        action = state.get_random_action()
+        state, is_done, _ = env.step(state, action)
+
+    reward = env.get_reward(state)
+    for i in range(len(history)):
+        history[i][2] = reward if i % 2 == 0 else -reward
 
     return history
 
@@ -39,6 +55,7 @@ def self_play(model):
     data = []
 
     for i in range(SP_GAME_COUNT):
+        
         history = play_one_game(model)
         data.extend(history)
 

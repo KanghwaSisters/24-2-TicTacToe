@@ -1,19 +1,23 @@
 # import
 from ResNet import Net
-from tictactoe_env import Environment
 from self_play import self_play
 from train_network import train_network
 from evaluate_network import evaluate_network
 from evaluate_best_player import evaluate_best_player
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname('/Users/seungyeonlee/Documents/GitHub/24-2-TicTacToe'))))
+
+from Environment import Environment
+
 # parameter
 TRAIN_NUM = 10
-
-state_size = (3,3)
-env = Environment(state_size)
+env = Environment()
 
 CONV_UNITS = 64
-model = Net(state_size, env.num_actions, CONV_UNITS)
+STATE_SIZE = (3, 3)
+model = Net(STATE_SIZE, env.num_actions, CONV_UNITS)
 
 
 # network train cycle
