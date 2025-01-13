@@ -7,14 +7,12 @@ from torchvision import transforms
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 학습된 모델 로드
 class TicTacToeCNN(nn.Module):
     def __init__(self):
         super(TicTacToeCNN, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
-        # batchNorm, dropout 추가해서 47%->61.11로 증가
         self.bn1 = nn.BatchNorm2d(64)
         self.bn2 = nn.BatchNorm2d(128)
         self.bn3 = nn.BatchNorm2d(256)
@@ -55,18 +53,34 @@ def classify_cell(model, frame):
 
 def extract_board(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    """
     _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    """
+    equalized_gray = cv2.equalizeHist(gray)
+
+    blurred = cv2.GaussianBlur(equalized_gray, (5, 5), 0)
+    edges = cv2.Canny(gray, 50, 150)
+    dilated = cv2.dilate(edges, None, iterations=2)
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
 
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
 
-        if cv2.contourArea(largest_contour) > 1000:
+        if cv2.contourArea(largest_contour) > 5000:
             x, y, w, h = cv2.boundingRect(largest_contour)
             board_img = frame[y:y+h, x:x+w]
+            _, board_img_thresh = cv2.threshold(cv2.cvtColor(board_img, cv2.COLOR_BGR2GRAY), 
+                                                128, 255, cv2.THRESH_BINARY)
+            board_img_colored = cv2.cvtColor(board_img_thresh, cv2.COLOR_GRAY2BGR)
+
             cv2.drawContours(frame, [largest_contour], -1, (0, 255, 0), 3)
-            return board_img
+
+            return board_img_colored
     return None
+
 
 def classify_board(board_img, model):
     board_img_resized = cv2.resize(board_img, (96, 96))

@@ -6,7 +6,6 @@ import cv2
 import torch
 
 def main():
-    # 왜 cuda 사용이 안되지?
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = TicTacToeCNN().to(device)
@@ -20,6 +19,8 @@ def main():
         if frame is None:
             break
 
+        # frame = cv2.bitwise_not(frame)
+
         board_img = extract_board(frame)
         board_state = classify_board(board_img, model)
 
@@ -28,7 +29,7 @@ def main():
             for row in board_state:
                 print(" | ".join(["O" if cell == 0 else "X" if cell == 1 else " " for cell in row]))
 
-        cv2.imshow("Tic-Tac-Toe Board Detection", board_img)
+        cv2.imshow("Tic-Tac-Toe Board Detection", frame)
 
         if cv2.waitKey(10) == 27:
             break
