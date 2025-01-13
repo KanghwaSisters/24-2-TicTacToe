@@ -25,17 +25,12 @@ class Environment:
 
     def get_reward(self, final_state):
         '''
-        게임이 종료된 state에 대해 first player의 reward를 반환한다.
+        게임이 종료된 state에 대해 last player의 reward를 반환한다.
         final_state: 게임이 종료된 state
         note: final_state가 is_lose라면, 해당 state에서 행동할 차례였던 플레이어가 패배한 것.
         '''
         _, is_lose = final_state.check_done()
-        is_first_player = final_state.check_first_player() # 최종 state의 플레이어
-
-        if not is_lose:
-            reward = self.reward_dict['draw']
-        else:  
-            reward = self.reward_dict['lose'] if is_first_player else self.reward_dict['win']
+        reward = self.reward_dict['lose'] if is_lose else self.reward_dict['draw']
 
         return reward
 

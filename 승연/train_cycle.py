@@ -13,18 +13,20 @@ from Environment import Environment
 
 # parameter
 TRAIN_NUM = 10
+
+STATE_SIZE = (3, 3)
 env = Environment()
 
 CONV_UNITS = 64
-STATE_SIZE = (3, 3)
-model = Net(STATE_SIZE, env.num_actions, CONV_UNITS)
+model = Net(env.num_actions, CONV_UNITS)
 
-
+###############################
 # network train cycle
-for i in range(TRAIN_NUM):
-    self_play(model)
-    train_network()
-    update_best_player = evaluate_network()
+def train(model):
+    for _ in range(TRAIN_NUM):
+        self_play(model)
+        train_network()
+        update_best_player = evaluate_network()
 
-    if update_best_player:
-        evaluate_best_player()
+        if update_best_player:
+            evaluate_best_player()

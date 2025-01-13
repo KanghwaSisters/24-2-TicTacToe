@@ -3,7 +3,7 @@ import numpy as np
 import copy
 import pickle
 
-from ResNet import ResidualBlock, Net
+from ResNet import Net
 from mcts import Mcts
 
 import sys
@@ -21,6 +21,7 @@ CONV_UNITS = 64
 env = Environment()
 state = State()
 
+##################################
 # 1번의 게임 play 함수
 def play_one_game(model):
     history = []
@@ -28,21 +29,25 @@ def play_one_game(model):
     state = State()
 
     while not is_done:
-        mcts = Mcts(env, model, state, temperature = SP_TEMPERATURE)
-        policies, _ = mcts.get_action() # 가능한 행동들의 확률 분포 얻기
+        mcts = Mcts(model, temperature = SP_TEMPERATURE)
+        policies = mcts.get_policy(state) # 가능한 행동들의 확률 분포 얻기
         legal_actions = np.where(state.get_legal_actions() == 1) # 가능한 행동 (index)
 
+        # 전체 행동에 대한 policy
         policy = [0] * (env.n ** 2)
-        for action, policy in zip(legal_actions, policies):
-            policy[action] = policy
+        for action, p in zip(legal_actions, policies):
+            policy[action] = p
         
         history.append([[state.state, state.enemy_state], policy, None])
 
         # 가능한 행동 중 랜덤으로 선택해서 게임 진행
-        action = state.get_random_action()
+        action = mcts.get_action(state, policies)
         state, is_done, _ = env.step(state, action)
 
-    reward = env.get_reward(state)
+    # first player 기준의 reward로 바꾸기
+    is_first_player = state.check_first_player()
+    reward = env.get_reward(state) if is_first_player else -env.get_reward(state)
+
     for i in range(len(history)):
         history[i][2] = reward if i % 2 == 0 else -reward
 
@@ -51,38 +56,45 @@ def play_one_game(model):
 
 # self play 함수
 def self_play(model):
-    env = copy.deepcopy(env)
     data = []
 
-    for i in range(SP_GAME_COUNT):
-        
+    for _ in range(SP_GAME_COUNT):
         history = play_one_game(model)
         data.extend(history)
 
     return data
 
+# history 불러오는 함수 (train_network와 겹치는 함수)
+def load_history(file):
+    try:
+        with open(file, 'rb') as f:
+            history = pickle.load(f)
+    except FileNotFoundError:
+        history = [] # 파일이 비어있는 경우 빈 리스트 생성
+
+    return history
+
+# history 저장 함수
+def save_history(file, data):
+    with open(file, 'wb') as f:
+        pickle.dump(data, f)
 
 #############################
 # 동작 확인 및 저장 예시
 if __name__ == '__main__':
     file_name = "model1"
 
-    state_size = (3,3)
-    env = Environment(state_size)
-    model = Net(state_size, env.num_actions, CONV_UNITS)
+    STATE_SIZE = (3,3)
+    env = Environment()
+    model = Net(env.num_actions, CONV_UNITS)
 
     # 원래 history 불러오기
-    try:
-        with open(f'{file_name}_history.pkl', 'rb') as f:
-            origin_data = pickle.load(f)
-    except FileNotFoundError:
-        origin_data = [] # 파일이 비어있는 경우 빈 리스트 생성
+    data = load_history(f'{file_name}_history.pkl')
 
     # self-play로 새롭게 얻은 history
-    data = self_play(model)
+    new_data = self_play(model)
     # 원래 history에 추가
-    origin_data.extend(data)
+    data.extend(new_data)
 
     # 파일에 저장
-    with open(f'{file_name}_history.pkl', 'wb') as f:
-            pickle.dump(origin_data, f)
+    save_history(f'{file_name}_history.pkl', data)

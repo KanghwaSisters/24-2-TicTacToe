@@ -37,7 +37,7 @@ class ResidualBlock(nn.Module):
 
 # main Net
 class Net(nn.Module):
-    def __init__(self, state_size, action_size, conv_units):
+    def __init__(self, action_size, conv_units):
         super().__init__()
         self.conv = nn.Conv2d(in_channels=1, out_channels=conv_units, kernel_size=(3,3), bias=False, padding=1)
         self.bn = nn.BatchNorm2d(conv_units)
@@ -45,12 +45,6 @@ class Net(nn.Module):
         self.residual_block = ResidualBlock(conv_units, conv_units)
 
         self.batch_size = BATCHSIZE
-
-        # self.fc_size = state_size[-1]*state_size[-2]*conv_units
-        # self.fc1 = nn.Linear(self.fc_size, action_size)
-
-        # self.fc2 = nn.Linear(state_size[-1]*state_size[-2], 1)
-        # self.tanh = nn.Tanh()
 
         self.policy_head = nn.Sequential(
             nn.Conv2d(conv_units, 2, kernel_size=1),
@@ -81,17 +75,7 @@ class Net(nn.Module):
         # pooling
         x = self.pool(x)
 
-        # 전연결 신경망
-        # x = x.view(self.batch_size, -1)
-        # x = self.fc1(x)
-
-        # # policy: action probability (vector) - softmax
-        # policy = F.softmax(x, dim=-1)
-
-        # # value: win probability (scalar) - tanh
-        # x = self.fc2(x)
-        # value = self.tanh(x)
-
+        # policy, value 출력
         policy = self.policy_head(x)
         value = self.value_head(x)
 
