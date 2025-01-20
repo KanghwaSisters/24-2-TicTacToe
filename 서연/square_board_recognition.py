@@ -59,26 +59,51 @@ def extract_square_board(frame):
     정사각형으로 보정하여 인식
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # 특정 임계값 이하의 픽셀을 흰색으로 설정
+
+    # 그림자 보정 옵션들
+    """
+    # 1. 특정 임계값 이하의 픽셀을 흰색으로 설정
     shadow_threshold = 100 # 그림자를 제거하기 위한 임계값
     gray[gray < shadow_threshold] = 255 # 임계값 이하를 흰색으로 설정
     _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    """
+
+    # 2. adaptiveThreshold: 이미지의 지역적 특성에 따라 임계값 다르게 적용
+    # 조명이 불균형하거나 다양한 조명 조건이 있는 이미지에서 유용
+    # 그림자 문제 해결? -> 테스트 해봐야함
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    edges = cv2.Canny(thresh, 170, 200)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
 
     """
+    # 3. 그림자 보정 x?
     equalized_gray = cv2.equalizeHist(gray)
 
     blurred = cv2.GaussianBlur(equalized_gray, (5, 5), 0)
     edges = cv2.Canny(gray, 50, 150)
     dilated = cv2.dilate(edges, None, iterations=2)
+
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     """
 
+    # 이미지 크기 계산
+    frame_height, frame_width = frame.shape[:2]
+    frame_area = frame_height * frame_width
+
+    # debug_frame = frame.copy()
+    # cv2.drawContours(debug_frame, contours, -1, (255, 0, 0), 2)
 
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest_contour)
 
-        if cv2.contourArea(largest_contour) > 5000:
+        # 이미지의 꼭짓점을 찾는 것을 방지하기 위해
+        # 이미지 크기 내부에서 보드를 찾도록 범위 지정
+        if frame_area * 0.01 < area < frame_area * 0.9:
             epsilon = 0.02 * cv2.arcLength(largest_contour, True)
             approx = cv2.approxPolyDP(largest_contour, epsilon, True)
 
@@ -86,7 +111,7 @@ def extract_square_board(frame):
                 points = np.array([point[0] for point in approx])
                 sorted_points = order_points(points)
 
-                # 디버킹 (찾은 꼭짓점 시각화)
+                # 디버깅 (찾은 꼭짓점 시각화)
                 for corner in sorted_points:
                     x, y = corner
                     cv2.circle(frame, (int(x), int(y)), 10, (0, 0, 255), -1)
@@ -102,22 +127,22 @@ def extract_square_board(frame):
                 # 투시 변환 행렬 계산
                 matrix = cv2.getPerspectiveTransform(sorted_points, dst_points)
                 board_img = cv2.warpPerspective(frame, matrix, (square_size, square_size))
-
-            _, board_img_thresh = cv2.threshold(cv2.cvtColor(board_img, cv2.COLOR_BGR2GRAY), 
+        
+                _, board_img_thresh = cv2.threshold(cv2.cvtColor(board_img, cv2.COLOR_BGR2GRAY), 
                                                 128, 255, cv2.THRESH_BINARY)
-            board_img_colored = cv2.cvtColor(board_img_thresh, cv2.COLOR_GRAY2BGR)
+                board_img_colored = cv2.cvtColor(board_img_thresh, cv2.COLOR_GRAY2BGR)
 
-            # 디버깅: 보정된 보드와 원본 프레임 표시
-            """
-            cv2.imshow("Original Frame", frame)
-            cv2.imshow("Extracted Square Board", board_img_colored)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-            """
+                cv2.drawContours(frame, [largest_contour], -1, (0, 255, 0), 3)
 
-            cv2.drawContours(frame, [largest_contour], -1, (0, 255, 0), 3)
+                return board_img_colored
+        
+            else:
+                print("Falied to find 4 corners.")
+        else: 
+            print(f"Contour area out of range: {area}")
+    else:
+        print("No contours found.")
 
-            return board_img_colored
     return None
 
 def order_points(points):
@@ -135,46 +160,7 @@ def order_points(points):
 
     return rect
 
-def visualize_corners(frame, corners):
-    """
-    4개의 꼭짓점을 시각화하여 보여주는 함수
-    """
-    # 꼭짓점에 원을 그림
-    for corner in corners:
-        x, y = corner[0]
-        cv2.circle(frame, (int(x), int(y)), 10, (0, 0, 255), -1)  # 빨간색 원을 그리기
-
-    # 꼭짓점들을 선으로 연결
-    for i in range(4):
-        pt1 = tuple(corners[i][0])
-        pt2 = tuple(corners[(i+1) % 4][0])
-        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)  # 초록색 선으로 연결
-
-    return frame
-
 def classify_board(board_img, model):
     board_img_resized = cv2.resize(board_img, (96, 96))
     board_state = classify_cell(model, board_img_resized)
     return board_state
-
-"""
-def extract_cells(frame, board_contour):
-    x, y, w, h = cv2.boundingRect(board_contour)
-    board = frame[y:y+h, x:x+w]
-    cell_size = h // 3
-    cells_with_contours = []
-
-    for i in range(3):
-        for j in range(3):
-            cell = board[i*cell_size:(i+1)*cell_size, j*cell_size:(j+1)*cell_size]
-
-            gray_cell = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray_cell, 127, 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            cv2.drawContours(cell, contours, -1, (0, 0, 255), 2)
-
-            cells_with_contours.append((i, j, cell))
-
-    return cells_with_contours
-"""
