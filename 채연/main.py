@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from cv2_videocapture import initialize_camera, get_frame
+from videocapture import initialize_camera, get_frame
 from board_recognition import TicTacToeCNN, extract_board, classify_board, classify_cell
 import cv2
 import torch
@@ -9,7 +9,7 @@ import time
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = TicTacToeCNN().to(device)
-    model.load_state_dict(torch.load(r"C:\Users\user\Desktop\TicTacToe\model_state_dict.pt", map_location=device, weights_only=True))
+    model.load_state_dict(torch.load(r"E:\이화여대\강화시스터즈\tictactoe\model_state_dict.pt", map_location=device, weights_only=True))
     model.eval() 
     
     '''q
@@ -17,7 +17,7 @@ def main():
     0: 노트북 카메라
     1: 폰 웹캠
     '''
-    vcap = initialize_camera(0)
+    vcap = initialize_camera(1)
 
     prev_pred = None  # 이전 예측 값 저장
     stable_pred = None  # 안정화된 보드 상태 저장
