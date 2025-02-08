@@ -1,14 +1,17 @@
 # import
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from Environment import Environment
+
 # parameter
-state_size = (3, 3) # env.state_size
-action_size = 9 # env.action_size
+env = Environment()
 
 CONV_UNITS = 64
 RESIDUAL_NUM = 16
-BATCHSIZE = 64
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ResNet
 '''
@@ -28,7 +31,7 @@ class ResidualBlock(nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         x = F.relu(x)
-        
+
         x = self.conv(x)
         x = self.bn(x)
         x += sc
@@ -37,28 +40,26 @@ class ResidualBlock(nn.Module):
 
 # main Net
 class Net(nn.Module):
-    def __init__(self, action_size, conv_units):
+    def __init__(self, action_size=env.num_actions, conv_units=CONV_UNITS):
         super().__init__()
         self.conv = nn.Conv2d(in_channels=1, out_channels=conv_units, kernel_size=(3,3), bias=False, padding=1)
         self.bn = nn.BatchNorm2d(conv_units)
         self.pool = nn.MaxPool2d(kernel_size=(3,3), stride=1, padding=1)
         self.residual_block = ResidualBlock(conv_units, conv_units)
 
-        self.batch_size = BATCHSIZE
-
         self.policy_head = nn.Sequential(
             nn.Conv2d(conv_units, 2, kernel_size=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(2, action_size),
+            nn.Linear(2*action_size, action_size),
             nn.Softmax(dim=1)
         )
-        
+
         self.value_head = nn.Sequential(
             nn.Conv2d(conv_units, 1, kernel_size=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(1, 1),
+            nn.Linear(action_size, 1),
             nn.Tanh()
         )
 

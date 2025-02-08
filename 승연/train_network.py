@@ -1,97 +1,163 @@
-# import 
+# import
 import torch
-from torch import nn, optim
+import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-from torchvision import datasets, transforms
-
 import numpy as np
-import pickle
 import random
 
 from ResNet import Net
-
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname('/Users/seungyeonlee/Documents/GitHub/24-2-TicTacToe'))))
-
+from file_save_load import load_history, load_model, save_history, save_model
+from mcts import Mcts
 from Environment import Environment
+from State import State
 
 # parameter
-TRAIN_EPOCHS = 100  # 학습 횟수
-BATCHSIZE = 64
-LEARN_MAX = 0.001
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-file_name = "model1"
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+LEARN_RATE = 0.001
+GAMMA = 0.1
+SP_GAME_COUNT = 2  # 셀프 플레이를 수행할 게임 수(오리지널: 25,000)
+SP_TEMPERATURE = 1.0
 
-state_size = (3,3)
+model = Net()
+
+OPTIMIZER = optim.Adam(model.parameters(), lr=LEARN_RATE)
+SCHEDULER = optim.lr_scheduler.StepLR(OPTIMIZER, step_size=10, gamma=GAMMA)
+CROSS_ENTROPY = torch.nn.CrossEntropyLoss()
+
+BATCHSIZE = 4
+TRAIN_EPOCHS = 10
+MEM_SIZE = 10000
+
 env = Environment()
 
-CONV_UNITS = 64
-model = Net(state_size, env.num_actions, CONV_UNITS).to(device)
+file_name = 'test'
 
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_MAX)
+# class
+class TrainNetwork:
+    __slots__ = ('file_name', 'model', 'device', 'optimizer', 'scheduler', 'cross_entropy', 'memory')
 
-'''
-차원 수정, history 보고 물려야함
-'''
-#######################################
-# loss function 정의
-def loss_function(pred_policy, pred_value, y):
-    mse = F.mse_loss(pred_policy, y[0])
-    cross_entrophy = -torch.mean(y[1] * torch.log(pred_value))
-    return mse + cross_entrophy
+    def __init__(self, file_name):
+        self.file_name = file_name
+        self.device = DEVICE
 
+        self.model = load_model(f'{file_name}_model_latest.pkl')
+        self.optimizer = OPTIMIZER
+        self.scheduler = SCHEDULER
+        self.cross_entropy = CROSS_ENTROPY
 
-# dataset을 만드는 함수
-def make_dataset(history):
-    batch_size = min(BATCHSIZE, len(history))
-    mini_batch = random.sample(history, batch_size)
-    states, policies, results = zip(mini_batch)
-    X = torch.tensor(states, dtype=torch.float32).to(device) # (batch_size, )
-    Y = torch.tensor([policies, results], dtype=torch.float32).to(device) # (batch_size, 2)
-    return X, Y
+        self.memory = load_history(f'{file_name}_history.pkl')
 
 
-# history 불러오는 함수 (self_play와 겹치는 함수)
-def load_history(file):
-    try:
-        with open(file, 'rb') as f:
-            history = pickle.load(f)
-    except FileNotFoundError:
-        history = [] # 파일이 비어있는 경우 빈 리스트 생성
+    def _self_play_one_game(self):
+        '''
+        model을 통한 MCTS 알고리즘에 따라
+        1번의 게임을 진행하는 함수
+        '''
+        history = []
 
-    return history
+        state = State()
+        is_done = False
 
-# 최근 모델 저장 함수 (evaluate_network와 겹치는 함수)
-def save_model(file, model):
-    with open(file, 'wb') as f:
-        pickle.dump(model.state_dict(), f)
+        while not is_done:
+            mcts = Mcts(self.model, temperature = SP_TEMPERATURE)
+            # state = state.to(self.device)
+            policies = mcts.get_policy(state) # 가능한 행동들의 확률 분포 얻기
+            legal_actions = state.get_legal_actions() # 가능한 행동 (index)
 
-# network train하는 함수
-def train_network():
-    history = load_history(f'{file_name}_history.pkl')
+            # 전체 행동에 대한 policy
+            policy = [0] * env.num_actions
+            for action, p in zip(legal_actions, policies):
+                policy[action] = p
 
-    for _ in range(TRAIN_EPOCHS):
-        X, Y = make_dataset(history)
-        # 우선 그냥 현재의 model로 학습한다는 느낌...
-        pred_policy, pred_value = model.forward(X)
-        loss = loss_function(pred_policy, pred_value, Y)
-        # 역전파
-        optimizer.zero_grad()
-        loss.requires_grad_(True)
-        loss.backward()
-        optimizer.step()
+            total_state = state.get_total_state()
+            history.append([total_state, policy, None])
 
-    # 최근 모델 저장
-    save_model(f'{file_name}_model_latest.pkl', model)
+            # 가능한 행동 중 랜덤으로 선택해서 게임 진행
+            action = mcts.get_action(state)
+            state, is_done, _ = env.step(state, action)
 
-    # lr,... epoch,... 조절...
-        
+        # first player 기준의 reward로 바꾸기
+        reward = env.get_first_reward(state)
 
+        for i in range(len(history)):
+            history[i][2] = reward if i % 2 == 0 else -reward
 
+        return history
 
 
-   
-    
+    def _self_play(self):
+        '''
+        self-play를 진행해 data를 만드는 함수
+        '''
+        data = []
+
+        for i in range(SP_GAME_COUNT):
+            history = self._self_play_one_game()
+            data.extend(history)
+            if (i+1) % 10 == 0:
+                print(f"{i+1}/{SP_GAME_COUNT}", end=" | ")
+
+        return data
+
+
+    def save_self_play_history(self):
+        '''
+        self_play를 진행하고, file 경로에 history를 저장하는 함수
+        '''
+        data = self._self_play()
+        self.memory.extend(data)
+        save_history(f'{file_name}_history.pkl', self.memory)
+
+
+    def _loss_function(self, pred_policy, pred_value, y):
+        '''
+        Define loss function
+        '''
+        y_policy = y[:, :-1]
+        y_value = y[:, -1:]
+
+        mse = F.mse_loss(pred_policy, y_policy)
+        cross_entropy = self.cross_entropy(pred_value, y_value)
+        return mse + cross_entropy
+
+
+    def _make_dataset(self):
+        '''
+        history에서 랜덤 추출하여 학습 가능한 dataset 형태로 만드는 함수
+        '''
+        batch_size = min(BATCHSIZE, len(self.memory))
+        mini_batch = random.sample(self.memory, batch_size)
+        states, policies, results = zip(*mini_batch)
+
+        policies = np.array(policies)
+        results = np.array(results).reshape(-1, 1)
+        Y_array = np.concatenate([policies, results], axis=1)
+
+        X = torch.tensor(states, dtype=torch.float32).to(self.device) # (batch_size, )
+        X = X.unsqueeze(1)
+        Y = torch.tensor(Y_array, dtype=torch.float32).to(self.device) # (batch_size, 2)
+
+        return X, Y
+
+
+    def train_network(self):
+        '''
+        최근 모델을 불러와서 학습하는 함수
+        '''
+        self.model = self.model.to(self.device)
+
+        for _ in range(TRAIN_EPOCHS):
+            X, Y = self._make_dataset()
+            pred_policy, pred_value = self.model.forward(X)
+            loss = self._loss_function(pred_policy, pred_value, Y)
+            # 역전파
+            self.optimizer.zero_grad()
+            loss.requires_grad_(True)
+            loss.backward()
+            self.optimizer.step()
+
+        # 최근 모델 저장
+        save_model(f'{file_name}_model_latest.pkl', self.model.to('cpu'))
+
+        return loss

@@ -88,29 +88,32 @@ class Environment:
         inverse_player_list = [None, None]
         inverse_player_list[0], inverse_player_list[1] = player_list[1], player_list[0]
         total_point = 0
-        count_win = 0
-        count_draw = 0
+        cnt_win = 0
+        cnt_draw = 0
+
+        result_list = []
+
         for i in range(num_game):
             if i % 2 == 0:
                 point = self.play_one_game(player_list)
                 total_point += point
-                count_win += 1 if point == 1 else 0
+                cnt_win += 1 if point == 1 else 0
         
             else:
                 point = self.play_one_game(inverse_player_list)
                 total_point += 1 - point
-                count_win += 1 if point == 1 else 0
+                cnt_win += 1 if point == 0 else 0
 
-            count_draw += 1 if point == 0.5 else 0
+            cnt_draw += 1 if point == 0.5 else 0
 
             # change player
             player_list[0].player = not player_list[0].player
             player_list[1].player = not player_list[1].player
 
         average_point = total_point / num_game
-        print(f"{label}: {round(average_point, 5)}/{total_point}/win:{count_win}/draw:{count_draw}")
+        print(f"{label}: {round(average_point, 5)} / win:{cnt_win} / draw:{cnt_draw}")
 
-        return average_point
+        return average_point, cnt_win, cnt_draw
 
 
     def show_one_game(self, player_list):
@@ -119,7 +122,7 @@ class Environment:
 
         game_boards = []
         game_boards_string = ['', '', '']
-        
+
         while not is_done:
             player = player_list[0] if state.check_first_player() else player_list[1]
 

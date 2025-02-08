@@ -20,6 +20,7 @@ def draw_game_board():
     while True:
         ser.write('S'.encode()) # 명령 전송
         print("Sent command: \'S\'")
+        
         waiting_robot()
         break
 
@@ -90,6 +91,6 @@ if __name__=="__main__":
     waiting_robot()
 
     draw_game_board()
-    send_to_robot('X', '1')
-    send_to_robot('O', '7')
+    # send_to_robot('X', '1')
+    # send_to_robot('O', '7')
     
