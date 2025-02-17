@@ -1,11 +1,14 @@
 ﻿# -*- coding: utf-8 -*-
 
+from cv2_VideoCapture import initialize_camera, get_frame
 import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torchvision import transforms
+import time
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -69,33 +72,33 @@ def extract_square_board(frame):
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     """
 
+    """
     # 2. adaptiveThreshold: 이미지의 지역적 특성에 따라 임계값 다르게 적용
     # 조명이 불균형하거나 다양한 조명 조건이 있는 이미지에서 유용
     # 그림자 문제 해결? -> 테스트 해봐야함
     thresh = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
     )
-    edges = cv2.Canny(thresh, 170, 200)
+    edges = cv2.Canny(thresh, 50, 150)
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-
     """
-    # 3. 그림자 보정 x?
-    equalized_gray = cv2.equalizeHist(gray)
 
-    blurred = cv2.GaussianBlur(equalized_gray, (5, 5), 0)
+
+    # 흑백 반전된 이미지가 들어온다는 것을 고려!!
+    # 3. 임계값 지정 + 얇은 선 잘 인식 
+    # shadow_threshold = 100  # 그림자를 제거하기 위한 임계값
+    # gray[gray < shadow_threshold] = 255  # 임계값 이하를 검은색으로 설정
+    # equalized_gray = cv2.equalizeHist(gray)
+
+    # blurred = cv2.GaussianBlur(equalized_gray, (5, 5), 0)
     edges = cv2.Canny(gray, 50, 150)
-    dilated = cv2.dilate(edges, None, iterations=2)
+    dilated = cv2.dilate(edges, None, iterations=5)
 
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    """
 
     # 이미지 크기 계산
     frame_height, frame_width = frame.shape[:2]
     frame_area = frame_height * frame_width
-
-    # debug_frame = frame.copy()
-    # cv2.drawContours(debug_frame, contours, -1, (255, 0, 0), 2)
 
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
@@ -164,3 +167,68 @@ def classify_board(board_img, model):
     board_img_resized = cv2.resize(board_img, (96, 96))
     board_state = classify_cell(model, board_img_resized)
     return board_state
+
+def camera_to_state(state):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    model = TicTacToeCNN().to(device)
+    model.load_state_dict(torch.load(r"C:\Temp\model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
+    model.eval()
+
+    prev_pred = None # 이전 상태
+    stable_pred = None # 안정화된 보드 상태 저장
+    last_change_time = time.time() # 마지막으로 변화가 감지된 시간
+    stability_duration = 2 # 안정화 시간 기준 (초)
+
+    vcap = initialize_camera(1)
+    if not vcap.isOpened():
+        raise IOError('camera is not opened!')
+
+    while True:
+        frame = get_frame(vcap)
+        if frame is None:
+            break
+
+        # 흑백 전환
+        frame = cv2.bitwise_not(frame)
+
+        board_img = extract_square_board(frame)
+        if board_img is None:
+            # print("No board detected. Try again...")
+            continue
+
+        board_state = classify_board(board_img, model)
+        if board_state is None:
+            continue
+
+        pred = np.array(board_state) # numpy 배열로 변환
+
+        # 보드 상태 변화 감지
+        if prev_pred is None or not np.array_equal(pred, prev_pred):
+            last_change_time = time.time()
+
+        # 안정화 조건 확인
+        if time.time() - last_change_time > stability_duration:
+            if stable_pred is None or not np.array_equal(pred, stable_pred):  # 배열 비교
+                stable_pred = pred
+                print("Stable Board State Detected (O=0, X=1, Blank=2):")
+                print(stable_pred)
+                
+            # 상태 반환
+            if stable_pred is not None and not np.array_equal(state, stable_pred):
+                # 디버깅
+                print("Initial state:")
+                print(state)
+                print("Stable prediction:")
+                print(stable_pred)
+                return stable_pred # 최종 변화 상태 반환
+
+        prev_pred = pred
+
+        cv2.imshow("Tic-Tac-Toe Board Detection", frame)
+
+        if cv2.waitKey(10) == 27:
+            break
+
+    vcap.release()
+    cv2.destroyAllWindows()

@@ -1,41 +1,24 @@
-# -*- coding: utf-8 -*-
-
-from cv2_VideoCapture import initialize_camera, get_frame
-from board_recognition import TicTacToeCNN, extract_board, classify_board, classify_cell
-import cv2
+﻿import time
+import numpy as np
 import torch
+from square_board_recognition import camera_to_state
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    """
+    camer_to_state 함수 test
+    """
 
-    model = TicTacToeCNN().to(device)
-    model.load_state_dict(torch.load(r"C:\Temp\model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
-    model.eval()
+    # 초기 state 설정 (예시: 빈 보드 상태)
+    initial_state = np.array([[0, 2, 2, 2, 1, 1, 2, 2, 0]])  # 2는 빈 칸을 나타냄
 
-    vcap = initialize_camera(0)
+    # detect_and_stabilize_board_state 함수 호출하여 안정화된 보드 상태 반환
+    stable_state = camera_to_state(initial_state)
 
-    while True:
-        frame = get_frame(vcap)
-        if frame is None:
-            break
-
-        # frame = cv2.bitwise_not(frame)
-
-        board_img = extract_board(frame)
-        board_state = classify_board(board_img, model)
-
-        if board_state is not None:
-            print("Predicted board state:")
-            for row in board_state:
-                print(" | ".join(["O" if cell == 0 else "X" if cell == 1 else " " for cell in row]))
-
-        cv2.imshow("Tic-Tac-Toe Board Detection", frame)
-
-        if cv2.waitKey(10) == 27:
-            break
-
-    vcap.release()
-    cv2.destroyAllWindows()
+    if stable_state is not None:
+        print("Stable Board State Detected:")
+        print(stable_state)
+    else:
+        print("No stable state detected.")
 
 if __name__ == "__main__":
     main()
