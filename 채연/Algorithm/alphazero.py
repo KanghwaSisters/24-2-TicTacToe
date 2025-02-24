@@ -14,15 +14,30 @@ https://github.com/Jpub/AlphaZero/blob/master/6_7_tictactoe/evaluate_network.py
 import numpy as np
 
 class State:
+    '''
+    input: board_size, pieces, enemy_pieces
+    한 state에 대한 정보와 게임 플레이 관련 메서드를 포함한 클래스이다.
+    '''
     def __init__(self, board_size=3, pieces=None, enemy_pieces=None):
-        self.board_size = board_size
+        self.board_size = board_size # 게임 보드 한 변의 길이
+
+        # 자신의 수와 상대의 돌을 원핫으로 표현 (dim: (3, 3))
         self.pieces = np.zeros(board_size * board_size, dtype=int) if pieces is None else np.array(pieces)
         self.enemy_pieces = np.zeros(board_size * board_size, dtype=int) if enemy_pieces is None else np.array(enemy_pieces)
 
+
     def piece_count(self, pieces):
+        '''
+        이 state의 전체 돌의 개수를 반환한다.
+        '''
         return np.sum(pieces)
 
     def is_lose(self):
+        '''
+        이 state의 lose 여부를 반환한다.
+        Note: 이 state에서 행동을 하기 전에 lose 여부를 확인한다.
+        따라서 이 state가 lose라면, 이전 state에서 상대의 행동으로 상대가 승리한 경우이다.
+        '''
         board = self.enemy_pieces.reshape(self.board_size, self.board_size)
 
         return any(
@@ -36,30 +51,45 @@ class State:
         )
 
     def is_draw(self):
+        '''
+        이 state의 draw 여부를 반환한다.
+        '''
         return self.piece_count(self.pieces) + self.piece_count(self.enemy_pieces) == self.board_size * self.board_size
 
     def is_done(self):
-        # 종료 조건: 상대방이 승리 or 무승부
+        '''
+        이 state의 게임 종료 여부를 반환한다.
+        종료 조건: 상대방이 승리 or 무승부
+        '''
         return self.is_lose() or self.is_draw()
 
     def next(self, action):
-        # 현재 상태에서 주어진 action(칸)에 말을 놓은 후 다음 상태 반환
+        '''
+        이 state에서 주어진 action(칸)에 돌을 놓은 후 다음 state를 반환한다.
+        '''
         pieces = self.pieces.copy()
         pieces[action] = 1
         return State(self.board_size, self.enemy_pieces, pieces)
 
     def legal_actions(self):
-        # 가능한 행동(빈 칸의 위치)을 반환
+        '''
+        가능한 행동(빈 칸의 위치)의 인덱스를 1차원 Numpy array로 반환한다.
+        '''
         return np.where((self.pieces + self.enemy_pieces) == 0)[0]
 
     def to_feature(self):
-        # 상태를 신경망 입력 형태로 변환 (2, board_size, board_size)
+        '''
+        이 state를 신경망 입력 형태로 변환한다. (2, board_size, board_size)
+        '''
         return np.stack([
             self.pieces.reshape(self.board_size, self.board_size),
             self.enemy_pieces.reshape(self.board_size, self.board_size)
         ], axis=0)
 
     def __str__(self):
+        '''
+        이 state를 문자열로 출력한다.
+        '''
         ox = ('o', 'x') if np.sum(self.pieces) == np.sum(self.enemy_pieces) else ('x', 'o')
         board = np.full(self.board_size * self.board_size, '-')
         board[self.pieces == 1] = ox[0]
@@ -69,10 +99,13 @@ class State:
         ])
 
     def get_total_state(self):
-    # """ 현재 보드 상태를 반환 (플레이어 + AI 말 포함)
+        '''
+        전체 state를 반환한다. (dim: (3, 3))
+        1: 자신의 돌, -1: 상대의 돌
+        '''
         board = np.zeros(self.board_size * self.board_size, dtype=int)
-        board[self.pieces == 1] = 1   # 플레이어 돌
-        board[self.enemy_pieces == 1] = -1  # AI 돌 (반대 방향)
+        board[self.pieces == 1] = 1   # 자신의 돌
+        board[self.enemy_pieces == 1] = -1  # 상대의 돌 (반대 방향)
         return board.reshape(self.board_size, self.board_size)
 
 """# Dual Network"""
@@ -82,35 +115,49 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class ResidualBlock(nn.Module):
+    '''
+    잔차 연결을 통해 학습을 돕는 Residual Block 클래스이다.
+    '''
     def __init__(self, n_filters=128):
         super().__init__()
-        self.conv1 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(n_filters)
-        self.conv2 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(n_filters)
+        self.conv1 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False) # 첫번째 3X3 컨볼루션
+        self.bn1 = nn.BatchNorm2d(n_filters) # 첫번째 배치 정규화
+        self.conv2 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False) # 두번째 3X3 컨볼루션
+        self.bn2 = nn.BatchNorm2d(n_filters) # 두번째 배치 정규화
 
     def forward(self, x):
-        shortcut = x # 잔차
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.bn2(self.conv2(x))
+        shortcut = x # 잔차 연결용 - 원래 입력값을 보존
+        x = F.relu(self.bn1(self.conv1(x))) # 첫번째 컨볼루션 -> 배치 정규화 -> Relu 활성화 함수
+        x = self.bn2(self.conv2(x)) # 두번째 컨볼루션 -> 배치 정규화
+        '''
+        x(변형된 값)에 shortcut(원래 입력값)을 더한 후 Relu 활성화 함수를 적용하여 최종 출력을 반환한다.
+        이를 통해 네트워크가 학습하기 쉬운 identity mapping(항등 함수)를 구현할 수 있다.
+        '''
         return F.relu(x + shortcut)
 
+
 class DualNetwork(nn.Module):
+    '''
+    AlphaZero에서 사용되는 정책과 가치 예측을 위한 듀얼 네트워크 구조를 구현한 것이다.
+    '''
     def __init__(self, board_size, input_channels=2, n_filters=128, n_res_blocks=16):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_channels, n_filters, kernel_size=3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(n_filters)
+        self.conv1 = nn.Conv2d(input_channels, n_filters, kernel_size=3, padding=1, bias=False) # 초기 3X3 컨볼루션
+        self.bn1 = nn.BatchNorm2d(n_filters) # 초기 배치 정규화
+        '''
+        RResidualBlock들을 연속적으로 쌓은 레이어 - 네트워크의 깊이를 증가시켜 복잡한 특징을 학습한다.
+        '''
         self.res_blocks = nn.Sequential(
             *[ResidualBlock(n_filters) for _ in range(n_res_blocks)]
         )
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.global_pool = nn.AdaptiveAvgPool2d(1) # 전역 평균 풀링 - 공간 차원 축소
 
-        # policy
+        # policy(정책): 각 보드 위치에 대한 확률을 예측
         self.policy_head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(n_filters, board_size * board_size),
+            nn.Linear(n_filters, board_size * board_size)
         )
-        # value
+        # value(가치): 현재 상태 가치를 -1과 1 사이의 값으로 예측
         self.value_head = nn.Sequential(
             nn.Flatten(),
             nn.Linear(n_filters, 1),
@@ -118,18 +165,18 @@ class DualNetwork(nn.Module):
         )
 
     def forward(self, x):
-        # input x : (배치 크기, 채널, 보드 크기, 보드 크기)
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.res_blocks(x)
+        '''
+        input x : (배치 크기, 채널, 보드 크기, 보드 크기)
+        '''
+        x = F.relu(self.bn1(self.conv1(x))) # 초기 컨볼루션 -> 배치 정규화 -> Relu 활성화 함수
+        x = self.res_blocks(x) # 여러 ResidualBlock들을 통과
         x = self.global_pool(x)
+        # 정책(head)과 가치(head)를 각각 계산하여 반환
         policy = self.policy_head(x)
         value = self.value_head(x)
         return policy, value
 
 """# MCTS"""
-
-C_PCUT = 1.0 # 탐험과 탐욕적 행동 선택 균형
-PV_EVALUATE_COUNT = 100
 
 from math import sqrt
 import numpy as np
@@ -137,8 +184,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # 추론
 def predict(model, state, board_size):
+    '''
+    주어진 게임 상태(state)에 대해 신경망(model)을 사용하여
+    정책(policy)과 가치(value)를 예측한다.
+    '''
     # 입력 데이터 정규화
-    x = np.array([state.pieces, state.enemy_pieces], dtype=np.float32) / 1.0 # np.array로 해놓고 torch.float32으로 함..
+    x = np.array([state.pieces, state.enemy_pieces], dtype=np.float32) / 1.0 
     x = x.reshape(2, board_size, board_size).transpose(0, 1, 2).reshape(1, 2, board_size, board_size)
     x = torch.tensor(x, dtype=torch.float32).to(device)
 
@@ -157,6 +208,11 @@ def predict(model, state, board_size):
     return policies, value[0]
 
 class MCTSNode:
+    '''
+    MCTS에서 사용되는 각 노드를 구현한 클래스.
+    각 노드는 하나의 게임 상태를 나타내며
+    해당 상태에서 가능한 행동에 대한 정보를 담고 있다.
+    '''
     def __init__(self, state, p, c_puct=C_PCUT):
         self.state = state
         self.p = p # 신경망에서 예측한 정책 확률
@@ -166,6 +222,11 @@ class MCTSNode:
         self.child_nodes = None
 
     def evaluate(self, model):
+        '''
+        현재 노드를 평가하는 함수.
+        종료된 게임 상태인지 확인하고
+        종료되지 않았다면 자식 노드를 확장하거나, 탐색을 계속 진행하면서 가치를 갱신한다.
+        '''
         # 1
         if self.state.is_done(): # 종료 상태인지 확인
             value = -1 if self.state.is_lose() else 0 # 패배: -1, 무승부: 0
@@ -173,6 +234,7 @@ class MCTSNode:
             self.w += value
             self.n += 1
             return value
+
         # 2
         # 자식 노드가 존재하지 않는 경우
         if not self.child_nodes:
@@ -186,6 +248,8 @@ class MCTSNode:
             for action, policy in zip(self.state.legal_actions(), policies):
               self.child_nodes.append(MCTSNode(self.state.next(action), policy, c_puct = self.c_puct))
             return value
+
+
         # 3
         else:
             # UCB1이 가장 큰 자식 노드를 평가해 가치 얻기
@@ -196,8 +260,11 @@ class MCTSNode:
             self.n += 1
             return value
 
-    # Upper Confidence Bound1
     def next_child_node(self):
+        '''
+        UCB1(Upper Confidence Bound1) 공식을 사용하여
+        탐험과 탐욕적 행동 간의 균형을 맞추는 방식으로 자식 노드를 선택한다.
+        '''
         # 공식
         t = sum(child.n for child in self.child_nodes)
         pucb_values = []
@@ -206,17 +273,28 @@ class MCTSNode:
                              self.c_puct * child_node.p * sqrt(t) / (1 + child_node.n))
         return self.child_nodes[np.argmax(pucb_values)] # 최대값 출력
 
-# 노드 리스트를 시행 횟수 리스트로 변환
+
 def nodes_to_scores(nodes):
+    '''
+    노드 리스트를 시행 횟수 리스트로 변환한다.
+    '''
     return [node.n for node in nodes]
 
-# 볼츠만 분포 계산
+
 def boltzman(xs, temperature):
+    '''
+    볼츠만 분포 계산
+    '''
     xs = [x ** (1 / temperature) for x in xs]
     return [x / sum(xs) for x in xs]
 
 # 몬테카를로 트리 탐색
 def pv_mcts_scores(model, state, temperature):
+    '''
+    트리 탐색을 통해서 상태(state)에서 가능한 각 행동에 대한 확률 분포를 계산한다.
+    여러 번의 시뮬레이션 후, 각 자식 노드의 방문 횟수를 점수로 변환하고,
+    볼츠만 분포를 사용하여 확률을 결정한다.
+    '''
     # 현재 상태의 루트 노드 생성
     root_node = MCTSNode(state, 0)
 
@@ -238,12 +316,20 @@ def pv_mcts_scores(model, state, temperature):
 
 # 몬테카를로 트리 탐색을 활용한 행동 선택
 def pv_mcts_action(model, temperature=0):
+    '''
+    pv_mcts_scores()를 사용하여 상태에 대한 확률적 action selector를 반환하는 함수.
+    temperature 값을 통해 탐험과 탐욕적 행동의 균형을 조절한다.
+    '''
     def action_selector(state):
         scores = pv_mcts_scores(model, state, temperature) # 각 행동에 대한(상태에 기반) 확률분포 계산
         return np.random.choice(state.legal_actions(), p=scores) # 하나의 행동을 확률적으로 선택
     return action_selector
 
 def mcts_simulation(root_node, model, simulations=100):
+    '''
+    여러 번의 시뮬레이션을 통해 주어진 루트 노드에서 가능한 행동들에 대한 확률을 계산한다.
+    각 자식 노드의 방문 횟수를 기준을 정책을 계산한다.
+    '''
     for _ in range(simulations):
         root_node.evaluate(model)
     # 방문 횟수 기준 정책 계산
@@ -254,6 +340,10 @@ def mcts_simulation(root_node, model, simulations=100):
 """# self play"""
 
 def self_play_game(model, board_size=3, simulations=100, temperature=0):
+    '''
+    MCTS를 활용해 self-play 게임을 진행하고,
+    각 상태에서 정책과 보상을 저장하여 상태, 정책, 보상 데이터를 반환한다.
+    '''
     state = State(board_size=board_size)
     game_data = []
 
@@ -262,9 +352,9 @@ def self_play_game(model, board_size=3, simulations=100, temperature=0):
         scores = pv_mcts_scores(model, state, temperature)
 
         # 점수를 고정 크기 정책으로 변환
-        ''' 이유
-         정책 벡터가 보드의 크기와 맞춰지고, 유효한 행동만 확률로 유지'''
-
+        '''
+        정책 벡터가 보드의 크기와 맞춰지고, 유효한 행동만 확률로 유지
+        '''
         full_policy = np.zeros(board_size * board_size, dtype=np.float32)
         legal_actions = state.legal_actions()  # 유효한 행동 리스트
         full_policy[legal_actions] = scores
@@ -282,6 +372,10 @@ def self_play_game(model, board_size=3, simulations=100, temperature=0):
 """# Train Model"""
 
 def train_model(model, scheduler, optimizer, game_data, epochs=1, batch_size=64):
+    '''
+    self-play로 얻은 데이터를 활용해 정책 및 가치함수를 학습한다.
+    배치단위로 손실을 계산하고 최적화하며, 스케줄러를 통해 학습률을 조정한다.
+    '''
     model.train()
     loss_fn_policy = torch.nn.CrossEntropyLoss()
     loss_fn_value = torch.nn.MSELoss()
@@ -329,7 +423,17 @@ def train_model(model, scheduler, optimizer, game_data, epochs=1, batch_size=64)
 """# Evaluate model"""
 
 def evaluate_models(new_model, old_model, games=20, board_size=3):
-    new_wins, old_wins = 0, 0
+    '''
+    AlphaZero의 신경망 모델을 서로 대결시켜
+    새 모델과 이전 모델의 성능을 비교하는 방식으로 평가한다.
+    각 모델의 승리 횟수를 통해 모델의 우수성을 판단한다.
+
+    new_model: 새로 학습된 신경망 모델
+    old_model: 이전에 학습된 신경망 모델
+    games: 두 모델이 대결한 게임의 수
+    board_size: 게임판 크기(3x3)
+    '''
+    new_wins, old_wins = 0, 0 # 각 모델의 승리 횟수를 기록하는 변수
     temperature = 1.0
 
     for _ in range(games):
