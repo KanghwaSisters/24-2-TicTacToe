@@ -4,49 +4,36 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import random
+import pandas as pd
 
-from ResNet import Net
-from file_save_load import load_history, load_model, save_history, save_model
-from mcts import Mcts
-from Environment import Environment
-from State import State
+from file_save_load import *
+from mcts import *
+from environment import *
+from net import *
 
-# parameter
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from config import *
 
-LEARN_RATE = 0.001
-GAMMA = 0.1
-SP_GAME_COUNT = 2  # 셀프 플레이를 수행할 게임 수(오리지널: 25,000)
-SP_TEMPERATURE = 1.0
 
-model = Net()
-
-OPTIMIZER = optim.Adam(model.parameters(), lr=LEARN_RATE)
-SCHEDULER = optim.lr_scheduler.StepLR(OPTIMIZER, step_size=10, gamma=GAMMA)
-CROSS_ENTROPY = torch.nn.CrossEntropyLoss()
-
-BATCHSIZE = 4
-TRAIN_EPOCHS = 10
-MEM_SIZE = 10000
-
-env = Environment()
-
-file_name = 'test'
-
-# class
 class TrainNetwork:
-    __slots__ = ('file_name', 'model', 'device', 'optimizer', 'scheduler', 'cross_entropy', 'memory')
+    __slots__ = ('env', 'file_name', 'model_type', 'model', 'device', 'temp', 'optimizer', 'scheduler', 'cross_entropy', 'memory', 'policy_loss_list', 'value_loss_list', 'loss_list', 'step_list')
 
-    def __init__(self, file_name):
+    def __init__(self, file_name, model_type):
+        self.env = Environment(STATE_SIZE, WIN_CONDITION)
         self.file_name = file_name
         self.device = DEVICE
+        self.temp = TEMPERATURE
 
-        self.model = load_model(f'{file_name}_model_latest.pkl')
-        self.optimizer = OPTIMIZER
-        self.scheduler = SCHEDULER
+        self.model_type = model_type
+        self.model = load_model(f'{file_name}_model_latest.pkl', model_type)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARN_RATE)
         self.cross_entropy = CROSS_ENTROPY
 
         self.memory = load_history(f'{file_name}_history.pkl')
+
+        self.policy_loss_list = []
+        self.value_loss_list = []
+        self.loss_list = []
+        self.step_list = []
 
 
     def _self_play_one_game(self):
@@ -59,31 +46,46 @@ class TrainNetwork:
         state = State()
         is_done = False
 
+        n_steps = 0
+
         while not is_done:
-            mcts = Mcts(self.model, temperature = SP_TEMPERATURE)
-            # state = state.to(self.device)
+            n_steps += 1
+
+            if n_steps > EXPLORE_REGULATION:
+                self.temp *= self.temp * TEMPERATURE_DECAY
+                self.temp = max(self.temp, 0.1)
+            
+            mcts = Mcts(self.model, temperature = self.temp)
+
             policies = mcts.get_policy(state) # 가능한 행동들의 확률 분포 얻기
             legal_actions = state.get_legal_actions() # 가능한 행동 (index)
 
             # 전체 행동에 대한 policy
-            policy = [0] * env.num_actions
+            policy = [0] * self.env.num_actions
             for action, p in zip(legal_actions, policies):
                 policy[action] = p
 
-            total_state = state.get_total_state()
-            history.append([total_state, policy, None])
+            if PLAYER_INFO:
+                player_arr = np.full(self.env.state_size, state.check_first_player()).reshape(1, self.env.n, self.env.n)
+                state_arr = np.concatenate([state.history, player_arr], axis=0)
+            else:
+                state_arr = np.array(state.history)
+            
+            history.append([state_arr, policy, None])
 
             # 가능한 행동 중 랜덤으로 선택해서 게임 진행
             action = mcts.get_action(state)
-            state, is_done, _ = env.step(state, action)
+            state, is_done, _ = self.env.step(state, action)
 
         # first player 기준의 reward로 바꾸기
-        reward = env.get_first_reward(state)
+        reward = self.env.get_first_reward(state)
 
         for i in range(len(history)):
-            history[i][2] = reward if i % 2 == 0 else -reward
+            history[i][-1] = reward if i % 2 == 0 else -reward
 
-        return history
+        print(f" << n_steps: {n_steps} >>")
+
+        return history, n_steps
 
 
     def _self_play(self):
@@ -92,11 +94,10 @@ class TrainNetwork:
         '''
         data = []
 
-        for i in range(SP_GAME_COUNT):
-            history = self._self_play_one_game()
+        for _ in range(SP_NUM_TRAIN):
+            history, n_steps = self._self_play_one_game()
             data.extend(history)
-            if (i+1) % 10 == 0:
-                print(f"{i+1}/{SP_GAME_COUNT}", end=" | ")
+            self.step_list.append(n_steps)
 
         return data
 
@@ -106,8 +107,28 @@ class TrainNetwork:
         self_play를 진행하고, file 경로에 history를 저장하는 함수
         '''
         data = self._self_play()
-        self.memory.extend(data)
-        save_history(f'{file_name}_history.pkl', self.memory)
+
+        if DATA_AGUMENTATION:
+            new_data = []
+            for _, temp in enumerate(data):
+                board, policy, value = temp
+                policy_arr = np.array(policy).reshape(self.env.n, self.env.n)
+
+                new_data.append((board, policy, value))
+                new_data.append((np.transpose(board.copy(), (0, 2, 1)), policy_arr.copy().T.flatten(), value))
+                new_data.append((np.fliplr(board.copy()), np.fliplr(policy_arr.copy()).flatten(), value))
+                new_data.append((np.transpose(np.fliplr(board.copy()), (0, 2, 1)), np.fliplr(policy_arr.copy()).T.flatten(), value))
+                new_data.append((np.flip(board.copy(), axis=2), np.flip(policy_arr.copy()).flatten(), value))
+                new_data.append((np.transpose(np.flip(board.copy(), axis=2), (0, 2, 1)), np.flip(policy_arr.copy()).T.flatten(), value))
+                new_data.append((np.fliplr(np.flip(board.copy(), axis=2)), np.fliplr(np.flip(policy_arr.copy())).flatten(), value))
+                new_data.append((np.transpose(np.fliplr(np.flip(board.copy(), axis=2)), (0, 2, 1)), np.fliplr(np.flip(policy_arr.copy())).T.flatten(), value))
+
+            self.memory.extend(new_data)
+
+        else:
+            self.memory.extend(data)
+
+        save_data(f"{self.file_name}_history.pkl", self.memory)
 
 
     def _loss_function(self, pred_policy, pred_value, y):
@@ -119,7 +140,7 @@ class TrainNetwork:
 
         mse = F.mse_loss(pred_policy, y_policy)
         cross_entropy = self.cross_entropy(pred_value, y_value)
-        return mse + cross_entropy
+        return mse, cross_entropy, mse + cross_entropy
 
 
     def _make_dataset(self):
@@ -134,9 +155,8 @@ class TrainNetwork:
         results = np.array(results).reshape(-1, 1)
         Y_array = np.concatenate([policies, results], axis=1)
 
-        X = torch.tensor(states, dtype=torch.float32).to(self.device) # (batch_size, )
-        X = X.unsqueeze(1)
-        Y = torch.tensor(Y_array, dtype=torch.float32).to(self.device) # (batch_size, 2)
+        X = torch.tensor(states, dtype=torch.float32).to(self.device) # (batch_size, STATE_DIM, env.n, env.n)
+        Y = torch.tensor(Y_array, dtype=torch.float32).to(self.device) # (batch_size, 82)
 
         return X, Y
 
@@ -146,18 +166,53 @@ class TrainNetwork:
         최근 모델을 불러와서 학습하는 함수
         '''
         self.model = self.model.to(self.device)
-
-        for _ in range(TRAIN_EPOCHS):
+        policy_loss_list = []
+        value_loss_list = []
+        loss_list = []
+        for i in range(TRAIN_EPOCHS):
             X, Y = self._make_dataset()
             pred_policy, pred_value = self.model.forward(X)
-            loss = self._loss_function(pred_policy, pred_value, Y)
+            policy_loss, value_loss, loss = self._loss_function(pred_policy, pred_value, Y)
             # 역전파
             self.optimizer.zero_grad()
             loss.requires_grad_(True)
             loss.backward()
             self.optimizer.step()
 
-        # 최근 모델 저장
-        save_model(f'{file_name}_model_latest.pkl', self.model.to('cpu'))
+            policy_loss_list.append(policy_loss.item())
+            value_loss_list.append(value_loss.item())
+            loss_list.append(loss.item())
 
-        return loss
+            if (i+1) % PRINT_LOSS_FREQENCY == 0:
+                print(f">> train step {i+1}/{TRAIN_EPOCHS} p_loss:{round(np.mean(policy_loss_list), 5)}, v_loss:{round(np.mean(value_loss_list), 5)}")
+
+        # 최근 모델 저장
+        save_model(f'{self.file_name}_model_latest.pkl', self.model.to('cpu'))
+
+        return policy_loss_list, value_loss_list, loss_list
+
+
+    def train_cycle(self, eval):
+        for i in range(EPISODES):
+            print(f"- - - - Episode {i+1}/{EPISODES} - - - -")
+            self.model = load_model(f'{self.file_name}_model_latest.pkl', self.model_type)
+            self.save_self_play_history()
+            policy_loss_list, value_loss_list, loss_list = self.train_network()
+            self.policy_loss_list.extend(policy_loss_list)
+            self.value_loss_list.extend(value_loss_list)
+            self.loss_list.extend(loss_list)
+            print(f" << policy loss: {round(np.mean(self.policy_loss_list[-10:]), 5)} / value_loss: {round(np.mean(self.value_loss_list[-10:]), 5)} >>")
+
+            df = pd.DataFrame([self.policy_loss_list, self.value_loss_list, self.loss_list])
+            save_data(f"{self.file_name}_loss_data.pkl", df)
+            save_data(f"{self.file_name}_step.pkl", self.step_list)
+
+            if (i+1) % EVAL_FREQUENCY == 0:
+                is_update_model = eval.evaluate_network(i)
+
+                if is_update_model:
+                    eval.evaluate_best_player(i)
+
+                eval.save_result_data()
+
+        print("Finish train")

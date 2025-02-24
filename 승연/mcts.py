@@ -4,26 +4,26 @@ from math import sqrt
 import numpy as np
 import torch
 
-from Environment import Environment
-
-# parameter
-C_PUCT = 1.0
-EVAL_CNT = 100
-TEMPERATURE = 1.0
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-env = Environment()
+from environment import Environment
+from config import *
 
 ##################################
 def predict(state, model):
     '''
     model을 통해 policy와 value 계산
     '''
+    env = Environment(STATE_SIZE, WIN_CONDITION)
+
     model = model.to(DEVICE)
-    x = state.get_total_state()
-    x = x.reshape(1, 1, 3, 3)
+    
+    if PLAYER_INFO:
+        player_arr = np.full(env.state_size, state.check_first_player()).reshape(1, env.n, env.n)
+        x = np.concatenate([state.history, player_arr], axis=0)
+    else:
+        x = np.array(state.history)
+
     x = torch.tensor(x, dtype=torch.float32).to(DEVICE)
+    x = x.unsqueeze(0)
     policies, value = model.forward(x)
 
     policies = policies.to('cpu').detach().numpy()[0]
@@ -35,12 +35,13 @@ def predict(state, model):
 
     return policies, value
 
-# define Node class
+
 # define Node class ##################
 class Node:
-    __slots__ = ('model', 'state', 'p', 'n', 'w', 'child_nodes')
+    __slots__ = ('env', 'model', 'state', 'p', 'n', 'w', 'child_nodes')
 
     def __init__(self, state, p, model):
+        self.env = Environment(STATE_SIZE, WIN_CONDITION)
         self.model = model
         self.state = state
         self.p = p # policy
@@ -53,7 +54,7 @@ class Node:
 
         # 게임 종료 시 승패 여부에 따라 value 업데이트
         if is_done:
-            value = env.get_reward(self.state)
+            value = self.env.get_reward(self.state)
             self.w += value
             self.n += 1
             return value
@@ -72,7 +73,7 @@ class Node:
             legal_actions = state.get_legal_actions()
 
             for action, policy in zip(legal_actions, policies):
-                next_state, _, _ = env.step(state, action)
+                next_state, _, _ = self.env.step(state, action)
                 self.child_nodes.append(Node(next_state, policy, self.model))
 
             return value
@@ -104,6 +105,8 @@ class Node:
         return pucb_sorted[-1]
 
 
+#########################################
+# define Mcts class
 #########################################
 # define Mcts class
 class Mcts:

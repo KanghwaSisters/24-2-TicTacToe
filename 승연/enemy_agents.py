@@ -1,16 +1,12 @@
 # import
 import numpy as np
 import random
-import math
+from math import log
 
-from Environment import Environment
+from environment import Environment
 
 # parameters
-env = Environment()
-
-AB_DEPTH = 100 # 알파베타 알고리즘
-MCS_PO_NUM = 30 # MCS 알고리즘
-MCTS_EV_NUM = 100 # MCTS 알고리즘
+from config import *
 
 # random agent ################################
 class RandomAgent:
@@ -32,6 +28,7 @@ class AlphaBetaAgent:
     __slots__ = ('player', 'best_action', 'root_node')
 
     def __init__(self, player:bool):
+        self.env = Environment(STATE_SIZE, WIN_CONDITION)
         self.player = player
         self.best_action = None
         self.root_node = None
@@ -52,7 +49,7 @@ class AlphaBetaAgent:
         legal_actions = present_state.get_legal_actions()
 
         if is_done or (depth == 0):
-            reward = env.get_reward(present_state)
+            reward = self.env.get_reward(present_state)
             return reward
 
         if present_state.check_first_player() == self.player: # max player
@@ -60,7 +57,7 @@ class AlphaBetaAgent:
 
             for action in legal_actions:
                 # state = copy.deepcopy(present_state)
-                next_state, _, _ = env.step(state, action)
+                next_state, _, _ = self.env.step(state, action)
 
                 eval = self.minimax(next_state, depth-1, alpha, beta)
 
@@ -81,7 +78,7 @@ class AlphaBetaAgent:
             min_eval = np.Inf
             for action in legal_actions:
                 # state = copy.deepcopy(present_state)
-                next_state, _, _ = env.step(state, action)
+                next_state, _, _ = self.env.step(state, action)
 
                 eval = self.minimax(next_state, depth-1, alpha, beta)
                 min_eval = min(min_eval, eval)
@@ -99,9 +96,10 @@ MCS_PO_NUM = 30
 
 # class
 class McsAgent():
-    __slots__ = ('player')
+    __slots__ = ('env', 'player')
 
     def __init__(self, player:bool):
+        self.env = Environment(STATE_SIZE, WIN_CONDITION)
         self.player = player
 
     def get_action(self, state):
@@ -109,7 +107,7 @@ class McsAgent():
         value_list = np.zeros(len(legal_actions))
 
         for i, action in enumerate(legal_actions):
-            next_state, _, _ = env.step(state, action)
+            next_state, _, _ = self.env.step(state, action)
 
             for _ in range(MCS_PO_NUM):
                 value_list[i] += - self.playout(next_state)
@@ -122,10 +120,10 @@ class McsAgent():
         is_done, _ = state.check_done()
 
         if is_done:
-            return env.get_reward(state)
+            return self.env.get_reward(state)
 
         action = state.get_random_action()
-        next_state, _, _ = env.step(state, action)
+        next_state, _, _ = self.env.step(state, action)
 
         return - self.playout(next_state)
 
@@ -136,112 +134,107 @@ class McsAgent():
 
 
 # MCTS Agent ################################
-# parameter
-MCTS_EV_NUM = 100
+# define Node class ##################
+class PureNode:
+    __slots__ = ('env', 'state', 'n', 'w', 'child_nodes')
+
+    def __init__(self, state):
+        self.env = Environment(STATE_SIZE, WIN_CONDITION)
+        self.state = state
+        self.n = 0 # visit count
+        self.w = 0 # cumulative sum of values
+        self.child_nodes = None
+
+    def evaluate(self):
+        is_done, _ = self.state.check_done()
+
+        # 게임 종료 시 승패 여부에 따라 value 업데이트
+        if is_done:
+            value = self.env.get_reward(self.state)
+            self.w += value
+            self.n += 1
+            return value
+
+        # child node가 없는 경우 확장
+        if not self.child_nodes:
+            value = self.playout(self.state)
+
+            self.w += value
+            self.n += 1
+
+            # expand child node
+            if self.n == 10:
+                self.expand()
+
+            return value
+
+        # end node가 아니고, child node가 있는 경우 -> 전개
+        else:
+            next_child_node = self.get_next_child_node()
+            value = - next_child_node.evaluate()
+
+            self.w += value
+            self.n += 1
+
+            return value
+
+
+    def expand(self):
+        '''
+        Expand child node
+        '''
+        legal_actions = self.state.get_legal_actions()
+        self.child_nodes = []
+
+        for action in legal_actions:
+            next_state, _, _ = self.env.step(self.state, action)
+            self.child_nodes.append(PureNode(next_state))
+
+
+    def get_next_child_node(self):
+        '''
+        UCB1이 가장 큰 child node를 선택
+        '''
+        node_scores = np.array(list(map(lambda c: c.n, self.child_nodes)))
+
+        # 방문 횟수가 0인 child node 반환
+        if np.any(node_scores == 0):
+            zero_idx = random.choice(np.where(node_scores == 0)[0])
+            return self.child_nodes[zero_idx]
+
+        total_scores = np.sum(node_scores)
+
+        # UCB1 계산 함수
+        def ucb1(c):
+            return -c.w/c.n + (2*log(total_scores)/c.n)**0.5
+
+        # ucb1 값에 따라 정렬한 child nodes list (마지막이 최댓값을 갖는 child node)
+        ucb1_sorted = sorted(self.child_nodes, key = lambda c: ucb1(c))
+
+        return ucb1_sorted[-1]
+
+
+    def playout(self, state):
+        is_done, _ = state.check_done()
+
+        if is_done:
+            return self.env.get_reward(state)
+
+        action = state.get_random_action()
+        next_state, _, _ = self.env.step(state, action)
+
+        return - self.playout(next_state)
 
 # class
 class MctsAgent():
-    __slots__ = ('Node', 'player')
+    __slots__ = ('player')
 
     def __init__(self, player:bool):
         self.player = player
 
-        # define Node class ##################
-        class Node:
-            __slots__ = ('state', 'n', 'w', 'child_nodes')
-
-            def __init__(self, state):
-                self.state = state
-                self.n = 0 # visit count
-                self.w = 0 # cumulative sum of values
-                self.child_nodes = None
-
-            def evaluate(self):
-                is_done, _ = self.state.check_done()
-
-                # 게임 종료 시 승패 여부에 따라 value 업데이트
-                if is_done:
-                    value = env.get_reward(self.state)
-                    self.w += value
-                    self.n += 1
-                    return value
-
-                # child node가 없는 경우 확장
-                if not self.child_nodes:
-                    value = self.playout(self.state)
-
-                    self.w += value
-                    self.n += 1
-
-                    # expand child node
-                    if self.n == 10:
-                        self.expand()
-
-                    return value
-
-                # end node가 아니고, child node가 있는 경우 -> 전개
-                else:
-                    next_child_node = self.get_next_child_node()
-                    value = - next_child_node.evaluate()
-
-                    self.w += value
-                    self.n += 1
-
-                    return value
-
-
-            def expand(self):
-                '''
-                Expand child node
-                '''
-                legal_actions = self.state.get_legal_actions()
-                self.child_nodes = []
-
-                for action in legal_actions:
-                    next_state, _, _ = env.step(self.state, action)
-                    self.child_nodes.append(Node(next_state))
-
-
-            def get_next_child_node(self):
-                '''
-                UCB1이 가장 큰 child node를 선택
-                '''
-                node_scores = np.array(list(map(lambda c: c.n, self.child_nodes)))
-
-                # 방문 횟수가 0인 child node 반환
-                if np.any(node_scores == 0):
-                    zero_idx = random.choice(np.where(node_scores == 0)[0])
-                    return self.child_nodes[zero_idx]
-
-                total_scores = np.sum(node_scores)
-
-                # UCB1 계산 함수
-                def ucb1(c):
-                    return -c.w/c.n + (2*math.log(total_scores)/c.n)**0.5
-
-                # ucb1 값에 따라 정렬한 child nodes list (마지막이 최댓값을 갖는 child node)
-                ucb1_sorted = sorted(self.child_nodes, key = lambda c: ucb1(c))
-
-                return ucb1_sorted[-1]
-
-
-            def playout(self, state):
-                is_done, _ = state.check_done()
-
-                if is_done:
-                    return env.get_reward(state)
-
-                action = state.get_random_action()
-                next_state, _, _ = env.step(state, action)
-
-                return - self.playout(next_state)
-        #########################################
-
-        self.Node = Node
-
 
     def get_action(self, state):
-        root_node = self.Node(state)
+        root_node = PureNode(state)
         root_node.expand()
 
         for _ in range(MCTS_EV_NUM):
