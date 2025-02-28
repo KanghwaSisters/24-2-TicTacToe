@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+from CV.camera_capture import *
 
-from camera_capture import initialize_camera, get_frame
 import cv2
 import torch
 import torch.nn as nn
@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import numpy as np
 from torchvision import transforms
 import time
+import os
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -162,7 +163,7 @@ def camera_to_state(state):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = TicTacToeCNN().to(device)
-    model.load_state_dict(torch.load(r"/Users/seungyeonlee/Documents/GitHub/24-2-TicTacToe/final/model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
+    model.load_state_dict(torch.load(rf"{os.getcwd()}/model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
     model.eval()
 
     prev_pred = None # 이전 상태
@@ -231,7 +232,7 @@ def return_state():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = TicTacToeCNN().to(device)
-    model.load_state_dict(torch.load(r"/Users/seungyeonlee/Documents/GitHub/24-2-TicTacToe/final/model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
+    model.load_state_dict(torch.load(rf"{os.getcwd()}/model_state_dict.pt", map_location=torch.device('cpu'), weights_only=True))
     model.eval()
 
     prev_pred = None # 이전 상태

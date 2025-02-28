@@ -1,7 +1,7 @@
 ﻿import time
 import numpy as np
 import torch
-from square_board_recognition import camera_to_state
+from CV.square_board_recognition import camera_to_state
 
 def main():
     """
