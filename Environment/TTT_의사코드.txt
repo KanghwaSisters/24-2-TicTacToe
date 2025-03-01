@@ -1,0 +1,32 @@
+# 초기화
+############
+# 비디오 처리
+
+# 0. 게임보드 이미지 받기 -> 카메라 대기
+
+############
+# 1. image -> state
+image = @@@
+images = cut image (9등분)
+output = model(images)
+state = output을 이용한 (3, 3)짜리 np.array
+
+# 2. get action from Agent
+action_idx = agent.get_action(state)
+
+# 3. robot move
+## Python -> Arduino 전달 후 대기
+Serial 통신: action_idx to Arduino
+Arduino move
+Serial 통신: done signal from Arduino
+
+#####################
+# 4. 카메라 인식 시작
+
+# 5. 사람이 행동 (게임보드에 동그라미 그리기)
+
+# 6. 카메라: 사람의 행동 인식 -> return to 0.
+legal_actions = [@@@]
+if legal_actions changed:
+    return to 0.
+
